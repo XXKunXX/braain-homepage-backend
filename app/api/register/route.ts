@@ -2,6 +2,9 @@
 // Nimmt das Registrierungsformular an, wählt eine freie Pool-Instanz,
 // ruft assign() auf und meldet direkt danach billing(ACTIVE) -- siehe
 // Abschnitte "Endpunkt assign", "Free-Lebenszyklus → Registrierung".
+//
+// Mit CORS, weil das native Registrierungs-Popup auf braain.io (eigener
+// Origin, World4You) diesen Endpunkt direkt per fetch() aufruft.
 import { NextRequest, NextResponse } from "next/server";
 import { assignInstance, reportBilling } from "@/lib/braainClient";
 import {
@@ -18,6 +21,7 @@ import {
   pickFreeInstance,
 } from "@/lib/poolRegister";
 import { checkSlugAvailability } from "@/lib/slug";
+import { corsHeaders, handleCorsPreflight } from "@/lib/cors";
 
 export const runtime = "nodejs";
 
@@ -29,12 +33,18 @@ function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 200;
 }
 
+export async function OPTIONS(req: NextRequest) {
+  return handleCorsPreflight(req) ?? new Response(null, { status: 204 });
+}
+
 export async function POST(req: NextRequest) {
+  const headers = corsHeaders(req.headers.get("origin"));
+
   let payload: Record<string, unknown>;
   try {
     payload = (await req.json()) as Record<string, unknown>;
   } catch {
-    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+    return NextResponse.json({ error: "invalid_json" }, { status: 400, headers });
   }
 
   const company = typeof payload.company === "string" ? payload.company.trim() : "";
@@ -51,10 +61,10 @@ export async function POST(req: NextRequest) {
   if (!slugCheck.valid || slugCheck.reason === "reserved") fields.push("slug");
 
   if (fields.length > 0) {
-    return NextResponse.json({ error: "invalid_payload", fields }, { status: 422 });
+    return NextResponse.json({ error: "invalid_payload", fields }, { status: 422, headers });
   }
   if (!slugCheck.available) {
-    return NextResponse.json({ error: "slug_taken" }, { status: 409 });
+    return NextResponse.json({ error: "slug_taken" }, { status: 409, headers });
   }
 
   // Zweitregistrierung mit derselben E-Mail (Abschnitt "Instanz-Pool →
@@ -64,7 +74,7 @@ export async function POST(req: NextRequest) {
   if (existing && existing.released_at === null) {
     return NextResponse.json(
       { error: "already_registered", customerRef: existing.customer_ref },
-      { status: 409 },
+      { status: 409, headers },
     );
   }
   if (existing && existing.released_at !== null && existing.last_backup_id) {
@@ -77,7 +87,7 @@ export async function POST(req: NextRequest) {
           customerRef: existing.customer_ref,
           backupId: existing.last_backup_id,
         },
-        { status: 409 },
+        { status: 409, headers },
       );
     }
   }
@@ -101,7 +111,7 @@ export async function POST(req: NextRequest) {
           queued: true,
           message: "Deine Umgebung wird eingerichtet, du bekommst den Zugang per E-Mail.",
         },
-        { status: 202 },
+        { status: 202, headers },
       );
     }
 
@@ -166,15 +176,18 @@ export async function POST(req: NextRequest) {
       // Antwort an den Browser ist das unkritisch, da assign() selbst schon
       // erfolgreich war.
 
-      return NextResponse.json({
-        ok: true,
-        customerRef,
-        slug,
-        domain: body.domain,
-        domainReady: body.domainReady,
-        invited: body.invited,
-        statusUrl: `/api/customer/${customerRef}/status`,
-      });
+      return NextResponse.json(
+        {
+          ok: true,
+          customerRef,
+          slug,
+          domain: body.domain,
+          domainReady: body.domainReady,
+          invited: body.invited,
+          statusUrl: `/api/customer/${customerRef}/status`,
+        },
+        { headers },
+      );
     }
 
     const errorCode = (result.body as { error?: string })?.error;
@@ -194,6 +207,6 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json(
     { error: "assign_failed", detail: lastError?.body ?? null },
-    { status: 502 },
+    { status: 502, headers },
   );
 }
