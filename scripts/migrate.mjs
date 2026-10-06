@@ -3,6 +3,12 @@
 // weil es hier vorerst nur eine Handvoll Tabellen gibt.
 //
 // Aufruf: npm run migrate
+//
+// Bewusst als reines .mjs (statt .ts über ts-node) geschrieben: der
+// ts-node/esm-Loader kollidiert auf neueren Node-Versionen (22.x) mit
+// Next.js' eigenem tsconfig ("module": "esnext" ohne "type": "module" in
+// package.json) und wirft ERR_REQUIRE_CYCLE_MODULE. Für dieses kleine,
+// typlose Skript reicht reines ESM-JavaScript, das läuft ohne Loader.
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { Pool } from "pg";
